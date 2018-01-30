@@ -188,17 +188,18 @@ build_sql_query() {
     volumes_query="WHERE (volume_name = '${SFVOLUMES[0]}')"
     for volume in "${SFVOLUMES[@]:1}"
       do
-        volumes_query="$volumes_query AND (volume_name = '$volume')"
+        volumes_query="$volumes_query OR (volume_name = '$volume')"
       done
   fi
   QUERY="SELECT
-      volume_name as "Volume",
-      user_name as "Username",
+      volume_name as \"Volume\",
+      user_name as \"User Name\",
+      group_name as \"Group Name\",
       SUM(ROUND((size)::DECIMAL/(1024*1024*1024), 2)) AS \"size (GB)\",
       SUM(count)::BIGINT AS \"Number of Files\",
       SUM(ROUND((cost)::DECIMAL,2)) AS \"Cost($)\"
     FROM sf_reports.last_time_generic_current $volumes_query
-    GROUP BY user_name,volume_name,size
+    GROUP BY user_name,volume_name,size,group_name
     ORDER BY size DESC
     LIMIT 20"
   logprint "SQL query set"
@@ -224,7 +225,7 @@ format_results() {
 #      print "Content-Type: text/html"
       printf ("%s\n<br>", "Subject: User size listing with cost report", ENVIRON["DAY"])
       print "<html><body><table border=1 cellspace=0 cellpadding=3>"
-      print "<td>Volume</td><td>User Name</td><td>Size</td><td>Count</td><td>Cost</td>"
+      print "<td>Volume</td><td>User Name</td><td>Group name</td><td>Size</td><td>Count</td><td>Cost</td>"
     } 
     {
       print "<tr>"
@@ -233,6 +234,7 @@ format_results() {
       print "<td>"$3"</td>";
       print "<td>"$4"</td>";
       print "<td>"$5"</td>";
+      print "<td>"$6"</td>";
       print "</tr>"
     } 
     END \
