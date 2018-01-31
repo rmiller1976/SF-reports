@@ -24,8 +24,6 @@ EMAILFROM=root
 SFVOLUMES=()
 QUERY=""
 SQLURI=""
-VERBOSE=false
-EMAIL_TEXT=""
 
 logprint() {
   echo "$(date +%D-%T): $*" >> $LOGFILE
@@ -72,7 +70,7 @@ Optional:
    --from <sender>	      - Email sender (default: root)
 
 Examples:
-$PROG volume nfs1 --email a@company.com,b@company.com
+$PROG --volume nfs1 --email a@company.com,b@company.com
 Run $PROG for SF volume nfs1, and email results to users a@company.com and b@company.com
 
 EOF
@@ -172,7 +170,6 @@ check_postgres_login() {
       SQLURI=`echo $LINE | cut -c 8-`
       set -e
       logprint "pg_uri found"    
-      [[ "$VERBOSE" == "true" ]] && logprint "VERBOSE: pg_uri - $SQLURI"
       urifound="true"
     fi
   done < $SFHOME/etc/99-local.ini
