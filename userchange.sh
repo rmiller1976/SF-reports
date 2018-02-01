@@ -9,7 +9,7 @@ set -euo pipefail
 ########################################################
 
 # Set variables
-readonly VERSION="1.0 January 31, 2018"
+readonly VERSION="1.0 February 1, 2018"
 PROG="${0##*/}"
 readonly SFHOME="${SFHOME:-/opt/starfish}"
 readonly LOGDIR="$SFHOME/log/${PROG%.*}"
@@ -70,10 +70,10 @@ Required:
    --min-size <minimum size>     - Minimum delta size (GB)
    --min-change <minimum change> - Minimum percent change
    --days <days>		 - Days to look back (default = 3)
+   --email <recipients>		 - Email reports to <recipients> (comma separated)
 
 Optional:
    --volume <SF volume name>  - Starfish volume name (if not specified, all volumes are included)
-   --email <recipients>       - Email reports to <recipients> (comma separated)
    --from <sender>	      - Email sender (default: root)
 
 Examples:
@@ -139,6 +139,11 @@ parse_input_parameters() {
     esac
     shift
   done
+  if [[ $MINSIZE == "" ]] || [[ $MINCHANGE == "" ]] || [[ $EMAIL == "" ]]; then
+    echo "Required parameter missing. Exiting.."
+    logprint "Required parameter missing. Exiting.."
+    exit 1
+  fi
   if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
     logprint " SF volumes: [All]" 
   else
@@ -273,21 +278,6 @@ WHERE ABS(percentage_delta) >= $MINCHANGE
   AND ABS(size_delta) >= $MINSIZE::DECIMAL*(1024*1024*1024.0)
 ORDER BY size_delta DESC
 LIMIT 20"
-
-#SELECT
-#      volume_name as \"Volume\",
-#      user_name as \"User Name\",
-#      group_name as \"Group Name\",
-#      SUM(ROUND((size)::DECIMAL/(1024*1024*1024), 2)) AS \"size (GB)\",
-#      SUM(count)::BIGINT AS \"Number of Files\",
-#      SUM(ROUND((cost)::DECIMAL,2)) AS \"Cost($)\"
-#    FROM sf_reports.last_time_generic_current $volumes_query
-#    GROUP BY user_name,volume_name,size,group_name
-#    ORDER BY size DESC
-#    LIMIT 20"
-
-
-
   logprint "SQL query set"
   logprint $QUERY
 }
@@ -298,7 +288,6 @@ execute_sql_query() {
   SQL_OUTPUT=`psql $SQLURI -F, -t -A -c "$QUERY"`
   set -e
   logprint "SQL Query executed"
-echo -e $SQL_OUTPUT
 }
 
 format_results() {
