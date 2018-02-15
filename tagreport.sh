@@ -39,7 +39,7 @@ set -euo pipefail
 #********************************************************
 
 # Set variables
-readonly VERSION="1.0 February 7, 2018"
+readonly VERSION="1.0 February 15, 2018"
 PROG="${0##*/}"
 readonly NOW=$(date +"%Y%m%d-%H%M%S")
 readonly SFHOME="${SFHOME:-/opt/starfish}"
@@ -58,6 +58,7 @@ EMAILFROM=root
 # Variables for SQL query scripts
 QUERY=""
 SQLURI=""
+SQLOUTPUT=""
 
 logprint() {
   echo "$(date +%D-%T): $*" >> $LOGFILE
@@ -241,44 +242,20 @@ ORDER BY sum(size) DESC
 }
 
 execute_sql_query() {
+  local errorcode
   logprint "executing SQL query"
   set +e
-  SQL_OUTPUT=`psql $SQLURI -F, -t -A -c "$QUERY"`
+  SQL_OUTPUT=`psql $SQLURI -F, -A -H -c "$QUERY" > $REPORTFILE 2>&1`
+  errorcode=$?
   set -e
-  logprint "SQL Query executed"
-}
-
-format_results() {
-  logprint "Formatting results"
-  DAY=`date '+%Y%m%d'`
-  `echo "$SQL_OUTPUT" | awk -v emfrom="$EMAILFROM" -v emto="$EMAIL" -F',' 'BEGIN \
-    {
-      print "From: " emfrom "\n<br>"
-      print "To: " emto "\n<br>"
-      print "Subject: Tag report for SF volumes" 
-      print "<html><body><table border=1 cellspace=0 cellpadding=3>"
-      print "<td>Tag</td><td>Previous Months: 0-1</td><td>Previous Months: 1-3</td><td>Previous Months: 3-6</td><td>Previous Months: 6-12</td><td>Previous Years: 1-2</td><td>Previous Years: 2-3</td><td>Previous Years: >3</td><td>Total (GB)</td>"
-    } 
-    {
-      print "<tr>"
-      print "<td>"$1"</td>";
-      print "<td>"$2"</td>";
-      print "<td>"$3"</td>";
-      print "<td>"$4"</td>";
-      print "<td>"$5"</td>";
-      print "<td>"$6"</td>";
-      print "<td>"$7"</td>";
-      print "<td>"$8"</td>";
-      print "<td>"$9"</td>";
-      print "</tr>"
-    } 
-    END \
-    {
-      print "</table></body></html>"
-      print "<br />"
-      print "<br />"
-    }' > $REPORTFILE` 
-  logprint "Results formatted"
+  if [[ $errorcode -eq 0 ]]; then
+    logprint "SQL query executed successfully"
+  else
+    logprint "SQL query failed with errorcode: $errorcode. Exiting.."
+    echo -e "SQL query failed with errorcode: $errorcode. Exiting.."
+    email_alert "SQL query failed with errorcode: $errorcode"
+    exit 1
+  fi
 }
 
 email_report() {
@@ -334,13 +311,9 @@ echo "Step 4 Complete"
 echo "Step 5: Execute SQL query"
 execute_sql_query
 echo "Step 5 Complete"
-echo "Step 6: Format results into HTML"
-#exit 1
-format_results
-echo "Step 6 Complete"
-echo "Step 7: Email results"
+echo "Step 6: Email results"
 email_report
-echo "Step 7 Complete"
+echo "Step 6 Complete"
 echo "Script complete"
 
 

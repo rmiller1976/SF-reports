@@ -39,7 +39,7 @@ set -euo pipefail
 #********************************************************
 
 # Set variables
-readonly VERSION="1.0 February 1, 2018"
+readonly VERSION="1.01 February 15, 2018"
 PROG="${0##*/}"
 readonly SFHOME="${SFHOME:-/opt/starfish}"
 readonly LOGDIR="$SFHOME/log/${PROG%.*}"
@@ -54,6 +54,7 @@ EMAIL=""
 EMAILFROM=root
 QUERY=""
 SQLURI=""
+SQL_OUTPUT=""
 MINSIZE=""
 MINCHANGE=""
 DAYSAGO=3
@@ -291,15 +292,7 @@ SELECT
        volume_name AS \"Volume\",
        start_date AS \"Start Date\",
        end_date AS \"End Date\",
-       -- column below is printed in HTML to produce nice looking result in redash
-       '<div class=\"' ||
-           CASE
-               WHEN (percentage_delta > 0) THEN 'bg-success'
-               WHEN (percentage_delta < 0) THEN 'bg-danger'
-               ELSE ''
-           END
-           || ' text-center\">' || ROUND(percentage_delta) || '%</div>'
-           AS \"Percent Delta\",
+       ROUND(percentage_delta) AS \"Percent Delta\",
        ROUND(previous_size / (1024*1024*1024.0), 1) AS \"Previous size GB\",
        ROUND(current_size / (1024*1024*1024.0), 1) AS \"Current size GB\",
        ROUND(size_delta / (1024*1024*1024.0), 1) AS \"Delta size GB\"
@@ -313,49 +306,27 @@ LIMIT 20"
 }
 
 execute_sql_query() {
+  local errorcode
   logprint "executing SQL query"
   set +e
-  SQL_OUTPUT=`psql $SQLURI -F, -t -A -c "$QUERY"`
+  SQL_OUTPUT=`psql $SQLURI -F, -A -H -c "$QUERY" > $REPORTFILE 2>&1`
+  errorcode=$?
   set -e
-  logprint "SQL Query executed"
-}
-
-format_results() {
-  logprint "Formatting results"
-  DAY=`date '+%Y%m%d'`
-  `echo "$SQL_OUTPUT" | awk -v emfrom="$EMAILFROM" -v emto="$EMAIL" -F',' 'BEGIN \
-    {
-      print "From: " emfrom "\n<br>"
-      print "To: " emto "\n<br>"
-#      print "MIME-Version: 1.0"
-#      print "Content-Type: text/html"
-      printf ("%s\n<br>", "Subject: User size listing with cost report", ENVIRON["DAY"])
-      print "<html><body><table border=1 cellspace=0 cellpadding=3>"
-      print "<td>Username</td><td>Volume</td><td>Start Date</td><td>End Date</td><td>Percent Delta</td><td>Previous Size GB</td><td>Current Size GB</td><td>Delta Size GB</td>"
-    } 
-    {
-      print "<tr>"
-      print "<td>"$1"</td>";
-      print "<td>"$2"</td>";
-      print "<td>"$3"</td>";
-      print "<td>"$4"</td>";
-      print "<td>"$5"</td>";
-      print "<td>"$6"</td>";
-      print "<td>"$7"</td>";
-      print "<td>"$8"</td>";
-      print "</tr>"
-    } 
-    END \
-    {
-      print "</table></body></html>"
-      print "<br />"
-      print "<br />"
-    }' > $REPORTFILE` 
-  logprint "Results formatted"
+  if [[ $errorcode -eq 0 ]]; then
+    logprint "SQL query executed successfully"
+  else
+    logprint "SQL query failed with errorcode: $errorcode. Exiting.."
+    echo -e "SQL query failed with errorcode: $errorcode. Exiting.."
+    email_alert "SQL query failed with errorcode: $errorcode"
+    exit 1
+  fi
 }
 
 email_report() {
-  local subject="Report: User size listing with cost"
+  if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
+    SFVOLUMES+="[All]"
+  fi
+  local subject="Report: User size change rate"
   logprint "Emailing results to $EMAIL"
   (echo -e "
 From: $EMAILFROM
@@ -404,13 +375,9 @@ echo "Step 4 Complete"
 echo "Step 5: Execute SQL query"
 execute_sql_query
 echo "Step 5 Complete"
-echo "Step 6: Format results into HTML"
-#exit 1
-format_results
-echo "Step 6 Complete"
-echo "Step 7: Email results"
+echo "Step 6: Email results"
 email_report
-echo "Step 7 Complete"
+echo "Step 6 Complete"
 echo "Script complete"
 
 
