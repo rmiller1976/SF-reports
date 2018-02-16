@@ -192,14 +192,7 @@ verify_sf_volume() {
   sf_vol_list_output=$(sf volume list | grep $1)
   set -e
   if [[ -z "$sf_vol_list_output" ]]; then
-    errorcode="Starfish volume $1 is not a Starfish configured volume. The following process can be followed to create a new Starfish volume for use with this script, if necessary:
-1) mkdir /mnt/sf/$1
-2) run 'mount -o noatime,vers=3 {isilon_host:/path_to_snapshot_data} /mnt/sf/$1'
-3) sf volume add $1 /mnt/sf/$1
-4) sf volume list (to verify volume added)
-5) sf scan list (to verify SF can access and scan the volume)
-6) sf scan pending (to verify the volume does not have a currently running scan)
-7) umount /mnt/sf/$1 (unmount volume in preparation for running this script)"
+    errorcode="Starfish volume $1 is not a Starfish configured volume."
     logprint "$errorcode"
     echo -e "$errorcode"
     email_alert "$errorcode"
@@ -238,9 +231,9 @@ check_postgres_login() {
 
 build_sql_query() {
   logprint "Building SQL query"
-  local volumes_query=""
+  local volumes_query="(volume_name is not null)"
   if [[ ${#SFVOLUMES[@]} > 0 ]]; then
-    volumes_query="WHERE (volume_name = '${SFVOLUMES[0]}')"
+    volumes_query="(volume_name = '${SFVOLUMES[0]}')"
     for volume in "${SFVOLUMES[@]:1}"
       do
         volumes_query="$volumes_query OR (volume_name = '$volume')"
@@ -251,14 +244,15 @@ WITH runtime_range AS (
     SELECT MIN(run_time) AS start,
            MAX(run_time) AS end
     FROM sf_reports.last_time_generic_history
-    WHERE run_time >= (now() - interval '$DAYSAGO days')
+    WHERE run_time >= (now() - interval '$DAYSAGO days') 
 ), user_size_for_chosen_days AS (
     SELECT volume_name,
            user_name,
            run_time,
            SUM(SIZE) AS size
-    FROM sf_reports.last_time_generic_history
+    FROM sf_reports.last_time_generic_history 
     INNER JOIN runtime_range ON run_time = runtime_range.start OR run_time = runtime_range.end
+    WHERE $volumes_query
     GROUP BY volume_name,
              user_name,
              run_time
@@ -326,12 +320,12 @@ email_report() {
   if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
     SFVOLUMES+="[All]"
   fi
-  local subject="Report: User size change rate"
+  local subject="Starfish User Size Change Rate Report (Minsize=$MINSIZE, Minchange=$MINCHANGE, Days back = $DAYSAGO)"
   logprint "Emailing results to $EMAIL"
   (echo -e "
 From: $EMAILFROM
 To: $EMAIL
-Subject: $subject")| mailx -s "$subject" -a $REPORTFILE -r $EMAILFROM $EMAIL
+Subject: $subject") | mailx -s "$subject" -a $REPORTFILE -r $EMAILFROM $EMAIL
 }
 
 # if first parameter is -h or --help, call usage routine
