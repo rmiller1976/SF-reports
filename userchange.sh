@@ -39,7 +39,7 @@ set -euo pipefail
 #********************************************************
 
 # Set variables
-readonly VERSION="1.01 February 15, 2018"
+readonly VERSION="1.01+ February 16, 2018"
 PROG="${0##*/}"
 readonly SFHOME="${SFHOME:-/opt/starfish}"
 readonly LOGDIR="$SFHOME/log/${PROG%.*}"
