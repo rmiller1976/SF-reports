@@ -62,7 +62,6 @@ LIMIT=20
 
 logprint() {
   echo "$(date +%D-%T): $*" >> $LOGFILE
-#  echo $*
 }
 
 email_alert() {
