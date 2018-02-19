@@ -4,7 +4,7 @@ set -euo pipefail
 
 ########################################################
 #
-# SF tool to create User Size Change Rate
+# SF tool to create User Size Change Rate Report
 #
 ########################################################
 
@@ -39,7 +39,7 @@ set -euo pipefail
 #********************************************************
 
 # Set variables
-readonly VERSION="1.01+ February 16, 2018"
+readonly VERSION="1.01 February 19, 2018"
 PROG="${0##*/}"
 readonly SFHOME="${SFHOME:-/opt/starfish}"
 readonly LOGDIR="$SFHOME/log/${PROG%.*}"
@@ -58,6 +58,7 @@ SQL_OUTPUT=""
 MINSIZE=""
 MINCHANGE=""
 DAYSAGO=3
+LIMIT=20
 
 logprint() {
   echo "$(date +%D-%T): $*" >> $LOGFILE
@@ -106,6 +107,7 @@ Required:
 Optional:
    --volume <SF volume name>  - Starfish volume name (if not specified, all volumes are included)
    --from <sender>	      - Email sender (default: root)
+   --limit <#>		      - Limit to # results (default: 20)
 
 Examples:
 $PROG --min-size 1 --min-change 1 --days 5 --email a@company.com,b@company.com
@@ -163,6 +165,11 @@ parse_input_parameters() {
       shift
       DAYSAGO=$1
       ;;      
+    "--limit")
+      check_parameters_value "$@"
+      shift
+      LIMIT=$1
+      ;;
     *)
       logprint "input parameter: $1 unknown. Exiting.."
       fatal "input parameter: $1 unknown. Exiting.."
@@ -180,6 +187,10 @@ parse_input_parameters() {
   else
     logprint " SF volume: ${SFVOLUMES[@]}"
   fi
+  logprint " Minimum size: $MINSIZE"
+  logprint " Minimum change: $MINCHANGE"
+  logprint " Days back: $DAYSAGO"
+  logprint " Limit: $LIMIT"
   logprint " email from: $EMAILFROM"
   logprint " email recipients: $EMAIL"
 }
@@ -294,7 +305,7 @@ FROM user_percentage_delta
 WHERE ABS(percentage_delta) >= $MINCHANGE
   AND ABS(size_delta) >= $MINSIZE::DECIMAL*(1024*1024*1024.0)
 ORDER BY size_delta DESC
-LIMIT 20"
+LIMIT $LIMIT"
   logprint "SQL query set"
   logprint $QUERY
 }
@@ -320,7 +331,7 @@ email_report() {
   if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
     SFVOLUMES+="[All]"
   fi
-  local subject="Starfish User Size Change Rate Report (Minsize=$MINSIZE, Minchange=$MINCHANGE, Days back = $DAYSAGO)"
+  local subject="Starfish User Size Change Rate Report (Minsize=$MINSIZE, Minchange=$MINCHANGE, Days=$DAYSAGO, Limit=$LIMIT)"
   logprint "Emailing results to $EMAIL"
   (echo -e "
 From: $EMAILFROM
