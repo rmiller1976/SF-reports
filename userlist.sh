@@ -39,7 +39,7 @@ set -euo pipefail
 #********************************************************
 
 # Set variables
-readonly VERSION="1.0 January 29, 2018"
+readonly VERSION="1.01 February 19, 2018"
 PROG="${0##*/}"
 readonly SFHOME="${SFHOME:-/opt/starfish}"
 readonly LOGDIR="$SFHOME/log/${PROG%.*}"
@@ -49,15 +49,16 @@ readonly REPORTFILE="${REPORTSDIR}/$(basename ${BASH_SOURCE[0]} '.sh')-$NOW.html
 readonly LOGFILE="${LOGDIR}/$(basename ${BASH_SOURCE[0]} '.sh')-$NOW.log"
 
 # Global variables
+SFVOLUMES=()
 EMAIL=""
 EMAILFROM=root
-SFVOLUMES=()
 QUERY=""
 SQLURI=""
+SQL_OUTPUT=""
+LIMIT=20
 
 logprint() {
   echo "$(date +%D-%T): $*" >> $LOGFILE
-#  echo $*
 }
 
 email_alert() {
@@ -93,11 +94,11 @@ $PROG [options]
 
    -h, --help              - print this help and exit
 
-
 Optional:
    --volume <SF volume name>  - Starfish volume name (if not specified, all volumes are included)
    --email <recipients>       - Email reports to <recipients> (comma separated)
    --from <sender>	      - Email sender (default: root)
+   --limit <#>	 	      - Limit to # results (default: 20)
 
 Examples:
 $PROG --volume nfs1 --email a@company.com,b@company.com
@@ -140,6 +141,11 @@ parse_input_parameters() {
       shift
       EMAILFROM=$1
       ;;
+    "--limit")
+      check_parameters_value "$@"
+      shift
+      LIMIT=$1
+      ;;
     *)
       logprint "input parameter: $1 unknown. Exiting.."
       fatal "input parameter: $1 unknown. Exiting.."
@@ -152,6 +158,7 @@ parse_input_parameters() {
   else
     logprint " SF volume: ${SFVOLUMES[@]}"
   fi
+  logprint " Limit: $LIMIT"
   logprint " email from: $EMAILFROM"
   logprint " email recipients: $EMAIL"
 }
@@ -164,14 +171,7 @@ verify_sf_volume() {
   sf_vol_list_output=$(sf volume list | grep $1)
   set -e
   if [[ -z "$sf_vol_list_output" ]]; then
-    errorcode="Starfish volume $1 is not a Starfish configured volume. The following process can be followed to create a new Starfish volume for use with this script, if necessary:
-1) mkdir /mnt/sf/$1
-2) run 'mount -o noatime,vers=3 {isilon_host:/path_to_snapshot_data} /mnt/sf/$1'
-3) sf volume add $1 /mnt/sf/$1
-4) sf volume list (to verify volume added)
-5) sf scan list (to verify SF can access and scan the volume)
-6) sf scan pending (to verify the volume does not have a currently running scan)
-7) umount /mnt/sf/$1 (unmount volume in preparation for running this script)"
+    errorcode="Starfish volume $1 is not a Starfish configured volume."
     logprint "$errorcode"
     echo -e "$errorcode"
     email_alert "$errorcode"
@@ -210,9 +210,9 @@ check_postgres_login() {
 
 build_sql_query() {
   logprint "Building SQL query"
-  local volumes_query=""
+  local volumes_query="(volume_name is not null)"
   if [[ ${#SFVOLUMES[@]} > 0 ]]; then
-    volumes_query="WHERE (volume_name = '${SFVOLUMES[0]}')"
+    volumes_query="(volume_name = '${SFVOLUMES[0]}')"
     for volume in "${SFVOLUMES[@]:1}"
       do
         volumes_query="$volumes_query OR (volume_name = '$volume')"
@@ -222,58 +222,40 @@ build_sql_query() {
       volume_name as \"Volume\",
       user_name as \"User Name\",
       group_name as \"Group Name\",
+      SUM(ROUND(size/(1024*1024*1024.0),2)) as sum_size,
       SUM(ROUND((size)::DECIMAL/(1024*1024*1024), 2)) AS \"size (GB)\",
       SUM(count)::BIGINT AS \"Number of Files\",
       SUM(ROUND((cost)::DECIMAL,2)) AS \"Cost($)\"
-    FROM sf_reports.last_time_generic_current $volumes_query
-    GROUP BY user_name,volume_name,size,group_name
-    ORDER BY size DESC
-    LIMIT 20"
+    FROM sf_reports.last_time_generic_current 
+    WHERE $volumes_query
+    GROUP BY user_name,volume_name,group_name
+    ORDER BY sum_size DESC
+    LIMIT $LIMIT"
   logprint "SQL query set"
   logprint $QUERY
 }
 
 execute_sql_query() {
+  local errorcode
   logprint "executing SQL query"
   set +e
-  SQL_OUTPUT=`psql $SQLURI -F, -t -A -c "$QUERY"`
+  SQL_OUTPUT=`psql $SQLURI -F, -A -H -c "$QUERY" > $REPORTFILE 2>&1`
+  errorcode=$?
   set -e
-  logprint "SQL Query executed"
-}
-
-format_results() {
-  logprint "Formatting results"
-  DAY=`date '+%Y%m%d'`
-  `echo "$SQL_OUTPUT" | awk -v emfrom="$EMAILFROM" -v emto="$EMAIL" -F',' 'BEGIN \
-    {
-      print "From: " emfrom "\n<br>"
-      print "To: " emto "\n<br>"
-#      print "MIME-Version: 1.0"
-#      print "Content-Type: text/html"
-      printf ("%s\n<br>", "Subject: User size listing with cost report", ENVIRON["DAY"])
-      print "<html><body><table border=1 cellspace=0 cellpadding=3>"
-      print "<td>Volume</td><td>User Name</td><td>Group name</td><td>Size</td><td>Count</td><td>Cost</td>"
-    } 
-    {
-      print "<tr>"
-      print "<td>"$1"</td>";
-      print "<td>"$2"</td>";
-      print "<td>"$3"</td>";
-      print "<td>"$4"</td>";
-      print "<td>"$5"</td>";
-      print "<td>"$6"</td>";
-      print "</tr>"
-    } 
-    END \
-    {
-      print "</table></body></html>"
-      print "<br />"
-      print "<br />"
-    }' > $REPORTFILE` 
-  logprint "Results formatted"
+  if [[ $errorcode -eq 0 ]]; then
+    logprint "SQL query executed successfully"
+  else
+    logprint "SQL query failed with errorcode: $errorcode. Exiting.."
+    echo -e "SQL query failed with errorcode: $errorcode. Exiting.."
+    email_alert "SQL query failed with errorcode: $errorcode"
+    exit 1
+  fi
 }
 
 email_report() {
+  if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
+    SFVOLUMES+="[All]"
+  fi
   local subject="Report: User size listing with cost"
   logprint "Emailing results to $EMAIL"
   (echo -e "
@@ -323,12 +305,9 @@ echo "Step 4 Complete"
 echo "Step 5: Execute SQL query"
 execute_sql_query
 echo "Step 5 Complete"
-echo "Step 6: Format results into HTML"
-format_results
-echo "Step 6 Complete"
-echo "Step 7: Email results"
+echo "Step 6: Email results"
 email_report
-echo "Step 7 Complete"
+echo "Step 6 Complete"
 echo "Script complete"
 
 
