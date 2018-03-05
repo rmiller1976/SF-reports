@@ -94,7 +94,7 @@ usage () {
   cat <<EOF
 
 User Size Listing with Cost HTML report.
-NOTE - This script uses sendmail.
+NOTE - This script uses sendmail to email. If email recipient is not specified, the report can be found in the {script path}/reports directory.
 
 $VERSION
 
@@ -115,16 +115,6 @@ Run $PROG for SF volume nfs1, and email results to users a@company.com and b@com
 
 EOF
 exit 1
-}
-
-check_path_exists () {
-  if [[ ! -d "$1" ]]; then
-    logprint "Directory $1 does not exist, exiting.."
-    echo "Directory $1 does not exist. Please create this path and re-run"
-    exit 1
-  else
-    logprint "Directory $1 found"
-  fi
 }
 
 parse_input_parameters() {
@@ -320,5 +310,3 @@ echo "Step 6: Email results"
 email_report
 echo "Step 6 Complete"
 echo "Script complete"
-
-
