@@ -38,8 +38,12 @@ set -euo pipefail
 #
 #********************************************************
 
+# Change Log
+# 1.02 (March 5, 2018) - Change from mailx to sendmail so html inline can be sent.
+#                      - Added option to specify attachment or inline
+
 # Set variables
-readonly VERSION="1.01 February 19, 2018"
+readonly VERSION="1.02 March 5, 2018"
 PROG="${0##*/}"
 readonly SFHOME="${SFHOME:-/opt/starfish}"
 readonly LOGDIR="$SFHOME/log/${PROG%.*}"
@@ -56,6 +60,8 @@ QUERY=""
 SQLURI=""
 SQL_OUTPUT=""
 LIMIT=20
+SUBJECT="Report: User Size Listing with Cost"
+ATTACH=0
 
 logprint() {
   echo "$(date +%D-%T): $*" >> $LOGFILE
@@ -87,7 +93,9 @@ usage () {
   fi
   cat <<EOF
 
-User Size Listing with Cost HTML report
+User Size Listing with Cost HTML report.
+NOTE - This script uses sendmail to email. If email recipient is not specified, the report can be found in the {script path}/reports directory.
+
 $VERSION
 
 $PROG [options]
@@ -99,6 +107,7 @@ Optional:
    --email <recipients>       - Email reports to <recipients> (comma separated)
    --from <sender>	      - Email sender (default: root)
    --limit <#>	 	      - Limit to # results (default: 20)
+   --attach                   - Send report as attachment instead of inline
 
 Examples:
 $PROG --volume nfs1 --email a@company.com,b@company.com
@@ -106,16 +115,6 @@ Run $PROG for SF volume nfs1, and email results to users a@company.com and b@com
 
 EOF
 exit 1
-}
-
-check_path_exists () {
-  if [[ ! -d "$1" ]]; then
-    logprint "Directory $1 does not exist, exiting.."
-    echo "Directory $1 does not exist. Please create this path and re-run"
-    exit 1
-  else
-    logprint "Directory $1 found"
-  fi
 }
 
 parse_input_parameters() {
@@ -146,6 +145,9 @@ parse_input_parameters() {
       shift
       LIMIT=$1
       ;;
+    "--attach")
+      ATTACH=1
+      ;;
     *)
       logprint "input parameter: $1 unknown. Exiting.."
       fatal "input parameter: $1 unknown. Exiting.."
@@ -159,8 +161,11 @@ parse_input_parameters() {
     logprint " SF volume: ${SFVOLUMES[@]}"
   fi
   logprint " Limit: $LIMIT"
-  logprint " email from: $EMAILFROM"
-  logprint " email recipients: $EMAIL"
+  logprint " Email from: $EMAILFROM"
+  logprint " Email recipients: $EMAIL"
+  logprint " Attachment (0=no, 1=yes): $ATTACH"
+  echo -e "<img src=\"http://starfishstorage.com/wp-content/uploads/2016/01/StarFishLogo.png\" alt=\"Starfish\" id=\"logo\" height=\"22\" width=\"88.6\" > " >> $REPORTFILE
+  echo -e "<p></p><b>$SUBJECT</b><p></p>" >> $REPORTFILE
 }
 
 verify_sf_volume() {
@@ -178,17 +183,6 @@ verify_sf_volume() {
     exit 1
   fi
   logprint "$1 found in Starfish"
-}
-
-check_mailx_exists() {
-  logprint "Checking for mailx"
-  if [[ $(type -P mailx) == "" ]]; then
-    logprint "Mailx not found, exiting.."
-    echo "mailx is required for this script. Please install mailx with yum or apt-get and re-run" 2>&1
-   exit 1
-  else
-    logprint "Mailx found"
-  fi
 }
 
 check_postgres_login() {
@@ -218,7 +212,8 @@ build_sql_query() {
         volumes_query="$volumes_query OR (volume_name = '$volume')"
       done
   fi
-  QUERY="SELECT
+  QUERY="
+      SELECT
       volume_name as \"Volume\",
       user_name as \"User Name\",
       group_name as \"Group Name\",
@@ -239,7 +234,7 @@ execute_sql_query() {
   local errorcode
   logprint "executing SQL query"
   set +e
-  SQL_OUTPUT=`psql $SQLURI -F, -A -H -c "$QUERY" > $REPORTFILE 2>&1`
+  SQL_OUTPUT=`psql $SQLURI -P footer=off -F, -A -H -c "$QUERY" >> $REPORTFILE 2>&1`
   errorcode=$?
   set -e
   if [[ $errorcode -eq 0 ]]; then
@@ -256,12 +251,20 @@ email_report() {
   if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
     SFVOLUMES+="[All]"
   fi
-  local subject="Report: User size listing with cost"
   logprint "Emailing results to $EMAIL"
-  (echo -e "
-From: $EMAILFROM
-To: $EMAIL
-Subject: $subject")| mailx -s "$subject" -a $REPORTFILE -r $EMAILFROM $EMAIL
+  if [[ $ATTACH -eq 0 ]]; then
+    (
+      echo -e "From: $EMAILFROM\nTo: $EMAIL\nSubject: $SUBJECT\nMIME-Version:1.0\nContent-Type: text/html" 
+      cat $REPORTFILE
+    ) | sendmail -t
+  else
+    (
+      echo -e 'Content-Type: text/html'
+      echo -e 'Content-Disposition: attachment; filename="'$(basename $REPORTFILE)'"'
+      echo -e "From: $EMAILFROM\nTo: $EMAIL\nSubject: $SUBJECT\n"
+      cat $REPORTFILE
+    ) | sendmail $EMAIL
+  fi
 }
 
 # if first parameter is -h or --help, call usage routine
@@ -296,8 +299,6 @@ echo "Step 2 Complete"
 echo "Step 3: Verify prereq's (postgres login and mailx)"
 check_postgres_login
 echo "Step 3 - postgres login verified"
-check_mailx_exists
-echo "Step 3 - mailx verified"
 echo "Step 3 Complete"
 echo "Step 4: Build SQL query"
 build_sql_query
@@ -309,5 +310,3 @@ echo "Step 6: Email results"
 email_report
 echo "Step 6 Complete"
 echo "Script complete"
-
-
