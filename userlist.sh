@@ -185,6 +185,17 @@ verify_sf_volume() {
   logprint "$1 found in Starfish"
 }
 
+check_mailx_exists() {
+  logprint "Checking for mailx"
+  if [[ $(type -P mailx) == "" ]]; then
+    logprint "Mailx not found, exiting.."
+    echo "mailx is required for this script. Please install mailx with yum or apt-get and re-run" 2>&1
+   exit 1
+  else
+    logprint "Mailx found"
+  fi
+}
+
 check_postgres_login() {
   local urifound
   urifound="false"
@@ -299,6 +310,8 @@ echo "Step 2 Complete"
 echo "Step 3: Verify prereq's (postgres login and mailx)"
 check_postgres_login
 echo "Step 3 - postgres login verified"
+check_mailx_exists
+echo "Step 3 - mailx verified"
 echo "Step 3 Complete"
 echo "Step 4: Build SQL query"
 build_sql_query

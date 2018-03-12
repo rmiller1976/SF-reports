@@ -110,7 +110,7 @@ Required:
    --min-change <minimum change> - Minimum percent change
 
 Optional:
-   --days <days>		 - Days to look back (default = 3)
+   --days <days>              - Days to look back (default = 3)
    --volume <SF volume name>  - Starfish volume name (if not specified, all volumes are included)
    --email <recipients>       -	Email reports to <recipients> (comma separated)
    --from <sender>	      - Email sender (default: root)
@@ -214,6 +214,17 @@ verify_sf_volume() {
     exit 1
   fi
   logprint "$1 found in Starfish"
+}
+
+check_mailx_exists() {
+  logprint "Checking for mailx"
+  if [[ $(type -P mailx) == "" ]]; then
+    logprint "Mailx not found, exiting.."
+    echo "mailx is required for this script. Please install mailx with yum or apt-get and re-run" 2>&1
+   exit 1
+  else
+    logprint "Mailx found"
+  fi
 }
 
 check_postgres_login() {
@@ -372,6 +383,8 @@ echo "Step 2 Complete"
 echo "Step 3: Verify prereq's (postgres login and mailx)"
 check_postgres_login
 echo "Step 3 - postgres login verified"
+check_mailx_exists
+echo "Step 3 - mailx verified"
 echo "Step 3 Complete"
 echo "Step 4: Build SQL query"
 build_sql_query

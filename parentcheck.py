@@ -33,15 +33,15 @@
 #********************************************************
 
 import psycopg2
-import configparser
+import ConfigParser
 import sys
 import pwd
 import grp
 
 def getpgauth():
-  config = configparser.ConfigParser()
+  config = ConfigParser.ConfigParser()
   config.read("/opt/starfish/etc/99-local.ini")
-  return(config['pg']['pg_uri'])
+  return(config.get('pg','pg_uri'))
 
 try:
   conn = psycopg2.connect(getpgauth())
@@ -84,8 +84,8 @@ def ctype(tname, volume):
 
 
 # get dir/dir pairs
-rows = ctype("dir", "starboard")
+rows = ctype("dir", "nfs1")
 # get dir/file pairs
-rows = ctype("file", "starboard")
+rows = ctype("file", "nfs1")
 
 
