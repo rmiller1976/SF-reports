@@ -36,17 +36,24 @@
 #
 # Run simple sql queries while removing the need to find the auth key or
 # format the query
+# This query outputs the query results, whatever they are, in a CSV output
+# format. It does not currently take care of quoting.
 
 import psycopg2
 import ConfigParser
 import sys
 import pwd
 import grp
+import argparse
 
 def getpgauth():
-  config = ConfigParser.ConfigParser()
-  config.read("/opt/starfish/etc/99-local.ini")
-  return(config.get('pg','pg_uri'))
+  try:
+    config = ConfigParser.ConfigParser()
+    config.read("/opt/starfish/etc/99-local.ini")
+    return(config.get('pg','pg_uri'))
+  except:
+    print "can't read config file to get connection uri. check permissions."
+    sys.exit(1)
 
 try:
   conn = psycopg2.connect(getpgauth())
@@ -54,14 +61,31 @@ except psycopg2.DatabaseError, e:
   print "unable to connect to the database: %s" % self.fmt_errmsg(e)
   sys.exit(1)
 
+# Parse Arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("--csv", action="store_true")
+parser.add_argument("--delimeter")
+parser.add_argument("--query")
+parser.parse_args()
+
+args = parser.parse_args()
+
+delimeter = " "
+if args.delimeter:
+  delimeter = args.delimeter
 
 cur = conn.cursor()
 
-q = sys.argv[1]
-print "executing query " + q
+#q = sys.argv[1]
+q = args.query
+#print "executing query " + q
 cur.execute(q)
 rows = cur.fetchall()
 
 for row in rows:
-  print row
+  if args.csv:
+    print ",".join(str(el) for el in row)
+  else:
+    print delimeter.join(str(el) for el in row)
+    
 
