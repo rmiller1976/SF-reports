@@ -55,6 +55,22 @@ def getpgauth():
   config.read("/opt/starfish/etc/99-local.ini")
   return(config.get('pg','pg_uri'))
 
+def ins_sort(k):
+    for i in range(1,len(k)):    #start at beginning of list
+        j = i                    #reducing i directly will break for loop, so reduce copy j 
+        temp = k[j]              #temp will be used for comparison with previous items, and sent to the place it belongs
+	#j>0 : no point going till k[0] since there is no seat available on its left, for temp
+        while j > 0 and temp < k[j-1]: 
+	    #Move the bigger item 1 step right to make room for temp
+            k[j] = k[j-1] 
+            #take k[j] all the way left to the place where it has a smaller/no value to its left.
+            j=j-1 
+        k[j] = temp
+    return k
+
+#--------------------------------------------------------------------------------------------
+
+# connect to Postgres
 try:
   conn = psycopg2.connect(getpgauth())
 except psycopg2.DatabaseError, e:
@@ -74,55 +90,87 @@ args = parser.parse_args()
 # Setup DB cursor
 cur = conn.cursor()
 
+# optional string appends to WHERE clause
+wlist = []
+
+# where clause
+wappend = ""
+
 # Check for volume
 if args.volume:
   volume = args.volume
+  wlist.append("v.name = '%s'" % (args.volume))
 else:
-  print "must supply --volume"
+  print "use of --volume is recommended"
+
+if args.path:
+  dirname = args.path
+  wlist.append("d.path like '%s'" % (args.path))
+
+if len(wlist) > 0:
+  wappend = "WHERE " + " AND ".join(wlist)
 
 
-qdirs = """SELECT d.size, extract(epoch from d.atime), m.path, d.path
-FROM sf_volumes.volume v 
-     JOIN sf.dir_current d ON v.id = d.volume_id
-     JOIN sf_volumes.mount m ON m.volume_id = v.id
-WHERE v.name = '%s'
-ORDER BY d.path""" % (args.volume)
+# we probably don't need this. Leaving it in an if for later
+qdirs = 0
 
-cur.execute(qdirs)
-rows = cur.fetchall()
+if qdirs:
+  qdirs = """SELECT d.size, extract(epoch from d.atime), m.path, d.path
+  FROM sf_volumes.volume v 
+       JOIN sf.dir_current d ON v.id = d.volume_id
+       JOIN sf_volumes.mount m ON m.volume_id = v.id
+  %s
+  ORDER BY d.path""" % (wappend)
 
-# open temp file
-d1 = open("/tmp/d1", "w+")
-for row in rows:
-  d1.write( "%d %d %s/%s\n" % (row))
-d1.close()
+  cur.execute(qdirs)
+  rows = cur.fetchall()
+
+  # open temp file
+  d1 = open("/tmp/d1", "w+")
+  for row in rows:
+    d1.write( "%d %d %s/%s\n" % (row))
+  d1.close()
     
-qfiles = """SELECT f.size, extract(epoch from f.atime), m.path, d.path, f.name
+
+# now do file list
+qfiles = """SELECT f.size, extract(epoch from f.atime), v.name, d.path, f.name
 FROM sf.file_current f JOIN sf_volumes.volume v ON v.id = f.volume_id 
      JOIN sf.dir_current d ON f.parent_id = d.id
-     JOIN sf_volumes.mount m ON m.volume_id = v.id
-WHERE v.name = '%s'
-ORDER BY d.path, d.name, f.name""" % (args.volume)
+%s
+ORDER BY v.name, d.path COLLATE "C", d.name COLLATE "C", f.name COLLATE "C" """ % (wappend)
 
+# debugging
+print qfiles
+#os.exit(0)
 
 cur.execute(qfiles)
 rows = cur.fetchall()
 
 # open temp file
 d2 = open("/tmp/d2", "w+")
+# print header
+d2.write("agedu dump file. pathsep=2f\n")
+# initialize path to do directory output when a new one is entered
+savepath = ""
 for row in rows:
-  if row[3] == "":
+  dpath = row[3]
+  if dpath != savepath:
+    # note, this gets the atime of the first element in the directory and set
+    # the directory size to 1024. That's really ok to a reasonable approximation.
+    d2.write("1024 %d %s:/%s\n" % (row)[1:-1])
+    savepath = dpath
+  if dpath == "":
     # absorb the / dir without doubling
-    d2.write("%d %d %s/%s%s\n" % (row))
+    d2.write("%d %d %s:/%s%s\n" % (row))
   else:
-    d2.write("%d %d %s/%s/%s\n" % (row))
+    d2.write("%d %d %s:/%s/%s\n" % (row))
 
 d2.close()
     
 
-d3 = open("/tmp/d3", "w")
+#d3 = open("/tmp/d3", "w")
 # print header
-d3.write("agedu dump file. pathsep=2f\n")
-d3.close()
-
-os.system("LC_ALL='C' sort -k3,30 /tmp/d1 /tmp/d2 >> /tmp/d3")
+#d3.write("agedu dump file. pathsep=2f\n")
+#d3.close()
+#
+#os.system("LC_ALL='C' sort -k3,30 /tmp/d1 /tmp/d2 >> /tmp/d3")
