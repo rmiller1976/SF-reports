@@ -38,31 +38,33 @@ set -euo pipefail
 #
 #********************************************************
 
+# Change Log
+# 1.01 (April 9, 2017) - Change from mailx to sendmail so html inline can be sent.
+#                      - Added option to specify attachment or inline
+
+
 # Set variables
-readonly VERSION="1.0 February 15, 2018"
+readonly VERSION="1.01 April 9, 2018"
 PROG="${0##*/}"
-readonly NOW=$(date +"%Y%m%d-%H%M%S")
 readonly SFHOME="${SFHOME:-/opt/starfish}"
 readonly LOGDIR="$SFHOME/log/${PROG%.*}"
-readonly LOGFILE="${LOGDIR}/$(basename ${BASH_SOURCE[0]} '.sh')-$NOW.log"
-
-# Only necessary for report scripts
 readonly REPORTSDIR="reports"
+readonly NOW=$(date +"%Y%m%d-%H%M%S")
 readonly REPORTFILE="${REPORTSDIR}/$(basename ${BASH_SOURCE[0]} '.sh')-$NOW.html"
+readonly LOGFILE="${LOGDIR}/$(basename ${BASH_SOURCE[0]} '.sh')-$NOW.log"
 
 # Global variables
 SFVOLUMES=()
 EMAIL=""
 EMAILFROM=root
-
-# Variables for SQL query scripts
 QUERY=""
 SQLURI=""
 SQLOUTPUT=""
+SUBJECT="Report: SF Tags"
+ATTACH=0
 
 logprint() {
   echo "$(date +%D-%T): $*" >> $LOGFILE
-#  echo $*
 }
 
 email_alert() {
@@ -92,18 +94,19 @@ usage () {
   cat <<EOF
 
 SF Tag Report
+NOTE - This script uses sendmail to email. If email recipient is not specified, the report can be found in the {script path}/reports directory.
+
 $VERSION
 
 $PROG [options] 
 
    -h, --help              - print this help and exit
 
-Required:
-   --email <recipients>		 - Email reports to <recipients> (comma separated)
-
 Optional:
    --volume <SF volume name>  - Starfish volume name (if not specified, all volumes are included)
+   --email <recipients>	      - Email reports to <recipients> (comma separated)
    --from <sender>	      - Email sender (default: root)
+   --attach		      - Send report as attachment
 
 Examples:
 $PROG --volume nfs1: --from sysadmin@company.com  --email a@company.com,b@company.com
@@ -136,6 +139,9 @@ parse_input_parameters() {
       shift
       EMAILFROM=$1
       ;;
+    "--attach")
+      ATTACH=1
+      ;;
     *)
       logprint "input parameter: $1 unknown. Exiting.."
       fatal "input parameter: $1 unknown. Exiting.."
@@ -143,13 +149,6 @@ parse_input_parameters() {
     esac
     shift
   done
-
-# Check for required parameters
-  if [[ $EMAIL == "" ]]; then
-    echo "Required parameter missing. Exiting.."
-    logprint "Required parameter missing. Exiting.."
-    exit 1
-  fi
   if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
     logprint " SF volumes: [All]" 
   else
@@ -157,6 +156,9 @@ parse_input_parameters() {
   fi
   logprint " email from: $EMAILFROM"
   logprint " email recipients: $EMAIL"
+  logprint " Attachment (0=no, 1=yes): $ATTACH"
+  echo -e "<img src=\"http://starfishstorage.com/wp-content/uploads/2016/01/StarFishLogo.png\" alt=\"Starfish\" id=\"logo\" height=\"22\" width=\"88.6\" > " >> $REPORTFILE
+  echo -e "<p></p><b>$SUBJECT</b><p></p>" >> $REPORTFILE
 }
 
 verify_sf_volume() {
@@ -167,14 +169,7 @@ verify_sf_volume() {
   sf_vol_list_output=$(sf volume list | grep $1)
   set -e
   if [[ -z "$sf_vol_list_output" ]]; then
-    errorcode="Starfish volume $1 is not a Starfish configured volume. The following process can be followed to create a new Starfish volume for use with this script, if necessary:
-1) mkdir /mnt/sf/$1
-2) run 'mount -o noatime,vers=3 {isilon_host:/path_to_snapshot_data} /mnt/sf/$1'
-3) sf volume add $1 /mnt/sf/$1
-4) sf volume list (to verify volume added)
-5) sf scan list (to verify SF can access and scan the volume)
-6) sf scan pending (to verify the volume does not have a currently running scan)
-7) umount /mnt/sf/$1 (unmount volume in preparation for running this script)"
+    errorcode="Starfish volume $1 is not a Starfish configured volume."
     logprint "$errorcode"
     echo -e "$errorcode"
     email_alert "$errorcode"
@@ -211,12 +206,11 @@ check_postgres_login() {
   fi
 }
 
-# Used for query scripts
 build_sql_query() {
   logprint "Building SQL query"
-  local volumes_query=""
+  local volumes_query="(volume_name is not null)"
   if [[ ${#SFVOLUMES[@]} > 0 ]]; then
-    volumes_query="WHERE (volume_name = '${SFVOLUMES[0]}')"
+    volumes_query="(volume_name = '${SFVOLUMES[0]}')"
     for volume in "${SFVOLUMES[@]:1}"
       do
         volumes_query="$volumes_query OR (volume_name = '$volume')"
@@ -232,7 +226,7 @@ sum(round(size/(1024*1024*1024.0),2)) filter (where atime_age = 'Previous Years:
 sum(round(size/(1024*1024*1024.0),2)) filter (where atime_age = 'Previous Years: 2-3') as \"Previous Years: 2-3\",
 sum(round(size/(1024*1024*1024.0),2)) filter (where atime_age = 'Previous Years: > 3') as \"Previous Years: > 3\",
 sum(round(size/(1024*1024*1024.0),2)) as \"Totals (GB)\"
-FROM sf_reports.tags_current $volumes_query
+FROM sf_reports.tags_current WHERE $volumes_query
 GROUP BY tag
 ORDER BY sum(size) DESC
 ;
@@ -245,7 +239,7 @@ execute_sql_query() {
   local errorcode
   logprint "executing SQL query"
   set +e
-  SQL_OUTPUT=`psql $SQLURI -F, -A -H -c "$QUERY" > $REPORTFILE 2>&1`
+  SQL_OUTPUT=`psql $SQLURI -P footer=off -F, -A -H -c "$QUERY" >> $REPORTFILE 2>&1`
   errorcode=$?
   set -e
   if [[ $errorcode -eq 0 ]]; then
@@ -262,12 +256,20 @@ email_report() {
   if [[ ${#SFVOLUMES[@]} -eq 0 ]]; then
     SFVOLUMES+="[All]"
   fi
-  local subject="Tag Report for SF volumes: ${SFVOLUMES[@]}"
   logprint "Emailing results to $EMAIL"
-  (echo -e "
-From: $EMAILFROM
-To: $EMAIL
-Subject: $subject")| mailx -s "$subject" -a $REPORTFILE -r $EMAILFROM $EMAIL
+  if [[ $ATTACH -eq 0 ]]; then
+    (
+      echo -e "From: $EMAILFROM\nTo: $EMAIL\nSubject: $SUBJECT\nMIME-Version:1.0\nContent-Type: text/html"
+      cat $REPORTFILE
+    ) | sendmail -t
+  else
+    (
+      echo -e 'Content-Type: text/html'
+      echo -e 'Content-Disposition: attachment; filename="'$(basename $REPORTFILE)'"'
+      echo -e "From: $EMAILFROM\nTo: $EMAIL\nSubject: $SUBJECT\n"
+      cat $REPORTFILE
+    ) | sendmail $EMAIL
+  fi
 }
 
 # if first parameter is -h or --help, call usage routine
