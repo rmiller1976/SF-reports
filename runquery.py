@@ -71,8 +71,11 @@ parser.parse_args()
 args = parser.parse_args()
 
 delimeter = " "
+if args.csv:
+  delimeter = ","
 if args.delimeter:
   delimeter = args.delimeter
+
 
 cur = conn.cursor()
 
@@ -83,9 +86,5 @@ cur.execute(q)
 rows = cur.fetchall()
 
 for row in rows:
-  if args.csv:
-    print ",".join(str(el) for el in row)
-  else:
-    print delimeter.join(str(el) for el in row)
-    
+  print delimeter.join(str(el) for el in row)
 
