@@ -69,8 +69,10 @@ def getpgauth():
         sys.exit(1)
 
 def logentry(__fn__,__st__):
-    with open(__fn___, "a") as f:
-        f.write(str(__st__)+'\n')
+    with open(__fn__, "a") as f:
+        __ts__=time.time()
+        __ds__=datetime.datetime.fromtimestamp(ts).strftime("%Y%m%d-%H%M%S")
+        f.write(__ds__+":  "+str(__st__)+'\n')
 
 #************************************************************
 # Start here
@@ -100,7 +102,7 @@ if not os.path.exists(logfile):
         print ("FATAL: Can't create log file - "+logfile)
         sys.exit(1)
 
-logentry(logfile,"*"*60)
+logentry(logfile,"*"*40)
 logentry(logfile,"Script Initiated at "+st)
 logentry(logfile,"Command Line Parameters:")
 for arg in vars(args):
