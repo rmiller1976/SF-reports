@@ -68,9 +68,9 @@ def getpgauth():
         print('FATAL: Can\'t read config file to get connection uri')
         sys.exit(1)
 
-def logentry(__a__,__b__):
-    with open(__a__, "a") as f:
-        f.write(str(__b__)+'\n')
+def logentry(__fn__,__st__):
+    with open(__fn___, "a") as f:
+        f.write(str(__st__)+'\n')
 
 #************************************************************
 # Start here
