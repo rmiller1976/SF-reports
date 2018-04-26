@@ -27,12 +27,17 @@
 #   RESTRICTED RIGHTS NOTICE: Use, duplication, or disclosure by the Government is subject to the
 #   restrictions as set forth in subparagraph (c)(1)(ii) of the Rights in Technical Data and Computer
 #   Software clause at DFARS 52.227-7013.
-#
+
 #********************************************************
 #  Author Ryan Miller
-#  Last modified 2018-04-25
+#  Last modified 2018-04-26
 #
 #  Report generation framework for Starfish
+
+#********************************************************
+#  Version History
+#  1.0
+
 
 #********************************************************
 #Import required modules
@@ -43,9 +48,11 @@ import sys
 import os
 import time
 import datetime
-import pwd # Unix password database access
-import grp # Unix group database access
+#import pwd # Unix password database access
+#import grp # Unix group database access
 import argparse # Parser for command line options
+import smtplib
+import email.message
 
 #********************************************************
 # Define fixed variables (Use sparingly!)
@@ -53,6 +60,11 @@ import argparse # Parser for command line options
 sfconfigfile="/opt/starfish/etc/99-local.ini"  
 logroot="/opt/starfish/log/sfreports/"        # NEEDS TRAILING '/'
 reports_dir="reports/"                        # NEEDS TRAILING '/'
+
+#********************************************************
+# Define defaults (these can be overridden in the sql config file)
+
+report_options = {'delimiter':',', 'format':'html', 'from':'root', }
 
 #********************************************************
 # Define functions
@@ -81,11 +93,7 @@ def logentry(__filein,__txtin):
 # Parse command line arguments
 # ----------------------------
 parser = argparse.ArgumentParser(description='Run a report query for Starfish')
-parser.add_argument('email', type=str, metavar='{recipient(s)}', nargs=1, help='Email report to {recipient(s)} (comma separated)')
 parser.add_argument('query', metavar='{filename}', nargs=1, help='File containing SQL query to run')
-parser.add_argument('--csv', action='store_true', help='Output in CSV format (default is HTML)')
-parser.add_argument('--delimiter', type=str, default=',', metavar='"x"', help='Set delimiter as x for CSV output (\'x\' can be any character. Default delimiter = ,)')
-parser.add_argument('--from', type=str, metavar='{address}', nargs=1, help='Email address report should be sent from')
 args=parser.parse_args()
 
 # Create logfile and initialize with header information and cmdline arguments
@@ -134,6 +142,22 @@ except psycopg2.Error, e:
     logentry(logfile,'FATAL: Unable to connect to the database. The following error message was generated:')
     logentry(logfile,e)
     sys.exit(1)
+
+# Read report options from config file
+# ------------------------------------
+try:
+    config=ConfigParser.ConfigParser()
+    config.read(args.query[0])
+    logentry(logfile,'Report parameters read from sql config file:')
+    for option in config.options('reportoptions'):
+        report_options[option]=readconfigfile(args.query[0],'reportoptions',option)
+        logentry(logfile,'  '+option+": "+report_options[option])
+    logentry(logfile,'All report parameters:')
+    for option in report_options:
+        logentry(logfile,'  '+option+": "+report_options[option])
+except Exception, e:
+    logentry(logfile,'FATAL: Unable to read report parameters in '+args.query[0])
+    sys.exit(1)
  
 # Read SQL query from config file
 # -------------------------------
@@ -181,26 +205,59 @@ with conn.cursor() as cursor:
 
 # Generate either csv or html report 
 # ----------------------------------
-if args.csv:
-    report_file=reports_directory+args.query[0].split(".",1)[0]+"-"+st+"-report.csv"
-    try:
-        with open(report_file, "w") as rf:
-            rf.write(args.delimiter.join(column_names)+"\n")
+report_file=reports_directory+args.query[0].split(".",1)[0]+"-"+st+"-report."+report_options['format']
+try:
+    with open(report_file, "w+") as rf:
+        if report_options['format'] == "csv":
+            rf.write((report_options['delimiter']).join(column_names)+"\n")
             for row in data_rows:
-                rf.write(args.delimiter.join(str(element) for element in row)+"\n")
-        logentry(logfile,'Report generated: '+report_file)
-    except Exception,e:
-        logentry(logfile,'FATAL: Error during report generation')
-        logentry(logfile,e)
-        sys.exit(1)
-else:
-    report_file=reports_directory+args.query[0].split(".",1)[0]+"-"+st+"-report.html"
-    
+                rf.write(report_options['delimiter'].join(str(element) for element in row)+"\n")
+        elif report_options['format'] == "html":
+#            rf.write('From: '+report_options['from'])
+#            rf.write('\nTo: '+report_options['to'])
+#            rf.write('\nSubject: '+report_options['subject'])
+#            rf.write('\nMIME-Version:1.0')
+#            rf.write('\nContent-Type: text/html')
+            rf.write('\n<img src="http://starfishstorage.com/wp-content/uploads/2016/01/StarFishLogo.png" alt="Starfish" id="logo" height="22" width="88.6">')
+            rf.write('\n<p></p><b>'+report_options['subject']+'</b><p></p>')
+            rf.write('\n<table border="1">')
+            rf.write('\n  <tr>')
+            for column in column_names:
+                rf.write('\n    <th align="center">'+str(column)+'</th>')
+            rf.write('\n  </tr>')
+            for row in data_rows:
+                rf.write('\n  <tr valign="top">')
+                for element in row:
+                    rf.write('\n    <td align="center">'+str(element)+'</td>')
+                rf.write('\n  </tr>')
+            rf.write('\n</table>')
+        else:
+            logentry(logfile,'FATAL: Invalid log format specified')
+            sys.exit(1)
+    logentry(logfile,'Report generated: '+report_file)
+except Exception,e:
+    logentry(logfile,'FATAL: Error during report generation')
+    logentry(logfile,e)
+    sys.exit(1)
 
-  
+# Email report
 
 
 
 
+with open(report_file, "r") as rf:
+    msg=email.message.Message()
+    msg['Subject']=report_options['subject']
+    msg['From']=report_options['from']
+    msg['To']=report_options['to']
+    msg.add_header('Content-Type', 'text/html')
+    msg.set_payload(rf.read())
+    from email.mime.text import MIMEText
+    attachment=MIMEText(rf.read())
+    attachment.add_header('Content-Disposition','attachment',filename=report_file)
+    att.attach(attachment)
+    s=smtplib.SMTP('localhost')
+    s.sendmail(report_options['from'], report_options['to'], msg.as_string())
+    s.quit()
 
 
