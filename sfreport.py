@@ -241,6 +241,7 @@ except Exception,e:
 # Email report
 # ------------
 
+logentry(logfile,'Emailing report')
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 msg=MIMEMultipart()
@@ -253,8 +254,8 @@ part['Content-Disposition'] = report_options['disposition']+';filename="%s"' % o
 msg.attach(part)
 s=smtplib.SMTP('localhost')
 s.sendmail(report_options['from'], report_options['to'], msg.as_string())
-s.quit()
-    
+logentry(logfile,'Report emailed. Script exiting..')
+sys.exit(0)
 
 
 
