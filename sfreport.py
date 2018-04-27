@@ -30,7 +30,7 @@
 
 #********************************************************
 #  Author Ryan Miller
-#  Last modified 2018-04-26
+#  Last modified 2018-04-27
 #
 #  Report generation framework for Starfish
 
@@ -64,7 +64,7 @@ reports_dir="reports/"                        # NEEDS TRAILING '/'
 #********************************************************
 # Define defaults (these can be overridden in the sql config file)
 
-report_options = {'delimiter':',', 'format':'html', 'from':'root', }
+report_options = {'delimiter':',', 'format':'html', 'from':'root', 'disposition':'inline', 'subject':'No subject set in report config file!'}
 
 #********************************************************
 # Define functions
@@ -93,7 +93,7 @@ def logentry(__filein,__txtin):
 # Parse command line arguments
 # ----------------------------
 parser = argparse.ArgumentParser(description='Run a report query for Starfish')
-parser.add_argument('query', metavar='{filename}', nargs=1, help='File containing SQL query to run')
+parser.add_argument('query', metavar='{filename}', nargs=1, help='File containing report options, query variables, and SQL query to run (see sfreport_example.sql for an example)')
 args=parser.parse_args()
 
 # Create logfile and initialize with header information and cmdline arguments
@@ -152,6 +152,9 @@ try:
     for option in config.options('reportoptions'):
         report_options[option]=readconfigfile(args.query[0],'reportoptions',option)
         logentry(logfile,'  '+option+": "+report_options[option])
+    if report_options['format'] == "csv":
+        logentry(logfile,'CSV output requested, changing disposition to attachment')
+        report_options['disposition'] = 'attachment'
     logentry(logfile,'All report parameters:')
     for option in report_options:
         logentry(logfile,'  '+option+": "+report_options[option])
@@ -213,11 +216,6 @@ try:
             for row in data_rows:
                 rf.write(report_options['delimiter'].join(str(element) for element in row)+"\n")
         elif report_options['format'] == "html":
-#            rf.write('From: '+report_options['from'])
-#            rf.write('\nTo: '+report_options['to'])
-#            rf.write('\nSubject: '+report_options['subject'])
-#            rf.write('\nMIME-Version:1.0')
-#            rf.write('\nContent-Type: text/html')
             rf.write('\n<img src="http://starfishstorage.com/wp-content/uploads/2016/01/StarFishLogo.png" alt="Starfish" id="logo" height="22" width="88.6">')
             rf.write('\n<p></p><b>'+report_options['subject']+'</b><p></p>')
             rf.write('\n<table border="1">')
@@ -241,23 +239,25 @@ except Exception,e:
     sys.exit(1)
 
 # Email report
+# ------------
 
-
-
-
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+msg=MIMEMultipart()
+msg['Subject']=report_options['subject']
+msg['From']=report_options['from']
+msg['To']=report_options['to']
 with open(report_file, "r") as rf:
-    msg=email.message.Message()
-    msg['Subject']=report_options['subject']
-    msg['From']=report_options['from']
-    msg['To']=report_options['to']
-    msg.add_header('Content-Type', 'text/html')
-    msg.set_payload(rf.read())
-    from email.mime.text import MIMEText
-    attachment=MIMEText(rf.read())
-    attachment.add_header('Content-Disposition','attachment',filename=report_file)
-    att.attach(attachment)
-    s=smtplib.SMTP('localhost')
-    s.sendmail(report_options['from'], report_options['to'], msg.as_string())
-    s.quit()
+    part=MIMEApplication(rf.read(),Name=os.path.basename(report_file))
+part['Content-Disposition'] = report_options['disposition']+';filename="%s"' % os.path.basename(report_file)
+msg.attach(part)
+s=smtplib.SMTP('localhost')
+s.sendmail(report_options['from'], report_options['to'], msg.as_string())
+s.quit()
+    
+
+
+
+
 
 
