@@ -48,8 +48,6 @@ import sys
 import os
 import time
 import datetime
-#import pwd # Unix password database access
-#import grp # Unix group database access
 import argparse # Parser for command line options
 import smtplib
 import email.message
@@ -241,20 +239,24 @@ except Exception,e:
 # Email report
 # ------------
 
-logentry(logfile,'Emailing report')
-from email.mime.application import MIMEApplication
-from email.mime.multipart import MIMEMultipart
-msg=MIMEMultipart()
-msg['Subject']=report_options['subject']
-msg['From']=report_options['from']
-msg['To']=report_options['to']
-with open(report_file, "r") as rf:
-    part=MIMEApplication(rf.read(),Name=os.path.basename(report_file))
-part['Content-Disposition'] = report_options['disposition']+';filename="%s"' % os.path.basename(report_file)
-msg.attach(part)
-s=smtplib.SMTP('localhost')
-s.sendmail(report_options['from'], report_options['to'], msg.as_string())
-logentry(logfile,'Report emailed. Script exiting..')
+try:
+    logentry(logfile,'Emailing report')
+    from email.mime.application import MIMEApplication
+    from email.mime.multipart import MIMEMultipart
+    msg=MIMEMultipart()
+    msg['Subject']=report_options['subject']
+    msg['From']=report_options['from']
+    msg['To']=report_options['to']
+    with open(report_file, "r") as rf:
+        part=MIMEApplication(rf.read(),Name=os.path.basename(report_file))
+    part['Content-Disposition'] = report_options['disposition']+';filename="%s"' % os.path.basename(report_file)
+    msg.attach(part)
+    s=smtplib.SMTP('localhost')
+    s.sendmail(report_options['from'], report_options['to'], msg.as_string())
+    logentry(logfile,'Report emailed. Script exiting..')
+except Exception,e:
+    logentry(logfile,'FATAL: Error during emailing of report')
+    logentry(logfile,e)
 sys.exit(0)
 
 
